@@ -1,0 +1,57 @@
+// sim.hoc -- script for running the virtual arm sim without Emacs
+
+// Initialization script for the intfcol-based virtual arm model. bbbq
+//
+// Last update: 6/15/12 (georgec)
+
+// Initialization text.
+printf("Initializing model...\n")
+
+// Stuff run-neuron does.  (Comment out when using run-neuron.)
+load_file("setup.hoc")
+load_file("nrnoc.hoc")
+
+load_file("init.hoc")
+
+// Load the template file.
+load_file("geom.hoc")
+
+// Load the "current sim" files.
+load_file("nqsnet.hoc")
+load_file("network.hoc")
+load_file("params.hoc")
+load_file("stim.hoc")
+load_file("sense.hoc")
+load_file("run.hoc")
+load_file("nload.hoc")
+load_file("basestdp.hoc")
+load_file("arm.hoc")
+
+// Initialization text.
+printf("Running the model with reward-and-punisher learning with 35 degree target...\n")
+
+// Make figures to show performance of the model.
+
+// Run the sim.
+run()
+
+// Bring up a new window for the elbow trajectory.
+gg(1)
+nqa.gr("ang1","t",1,3,0)
+drline(0,tAng[1],t,tAng[1],g[1],3,2)
+drline(0,minang[1],t,minang[1],g[1],1,3)
+drline(0,maxang[1],t,maxang[1],g[1],1,3)
+g[1].exec_menu("View = plot")
+
+// Bring up a raster plot for the raster for the first 1 sec.
+gg(2)
+gvt=gvmarkflag
+gvmarkflag=1
+for CDX=0,numcols-1 {
+  if(snq[CDX]==nil) mksnq()
+  if(snq[CDX].select("t","[]",0*1e3,1*1e3)){
+    snq[CDX].gr("gid","t",2,CDX+2,3)
+  }
+}
+g[2].exec_menu("View = plot")
+gvmarkflag=gvt

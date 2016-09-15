@@ -1,0 +1,39 @@
+load_file("nrngui.hoc")
+
+// load_files copied from sim.hoc up to right before the run() command
+// so that the model can be loaded for examination before modelview
+
+// sim.hoc -- script for running the virtual arm sim without Emacs
+
+// Initialization script for the intfcol-based virtual arm model. bbbq
+//
+// Last update: 6/15/12 (georgec)
+
+// Initialization text.
+printf("Initializing model...\n")
+
+// Stuff run-neuron does.  (Comment out when using run-neuron.)
+load_file("setup.hoc")
+load_file("nrnoc.hoc")
+
+load_file("init.hoc")
+
+// Load the template file.
+load_file("geom.hoc")
+
+// Load the "current sim" files.
+load_file("nqsnet.hoc")
+load_file("network.hoc")
+load_file("params.hoc")
+load_file("stim.hoc")
+load_file("sense.hoc")
+load_file("run.hoc")
+load_file("nload.hoc")
+load_file("basestdp.hoc")
+load_file("arm.hoc")
+
+
+xpanel("Chadderdon GL, Neymotin SA, Kerr CC, Lytton WW (2012)")
+  xlabel("Click below button to start the simulation")
+  xbutton("load sim.hoc","load_file(\"sim.hoc\")")
+xpanel()

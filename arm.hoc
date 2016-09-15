@@ -1,0 +1,1258 @@
+// $Id: arm.hoc,v 1.134 2012/03/08 17:56:22 samn Exp $ 
+
+DOPE_INTF6 = 1
+EDOPE_INTF6 = 1
+IDOPE_INTF6 = 0
+ESTDP_INTF6 = ISTDP_INTF6 = 0
+declare("verbosearm",0)
+
+//* templates - need to write
+begintemplate p2d
+double x[1],y[1]
+public x,y
+proc init () {
+  if(numarg()==2) {x=$1 y=$2}
+}
+endtemplate p2d
+
+//* variables/declares
+
+declare("aid","o[1]") // finitializehandler for arm
+declare("nqaupd","o[1]") // NQS for arm updates (not all involving position changes)
+declare("nqa","o[1]") // NQS for recording arm joint angles/positions in time
+declare("nqE","o[1]") // has E assignment to muscle groups
+declare("nqDP","o[1]") // has DP assignment to muscle groups
+declare("MTYP","o[1]") // has muscle names
+declare("armSeg",2) // number of segments
+declare("armLen","d[2]") // length of each arm segment -- fixed throughout sim
+declare("MLen","d[4]") // length of each muscle -- varies throughout sim
+declare("MFctr",1)
+declare("minMLen","d[4]","maxMLen","d[4]") // min/max muscle lengths
+declare("rotfctr","d[2]") // multiplies diff in muscle group activation into rotation angle
+declare("minang","d[2]","maxang","d[2]") // min/max angles for each joint
+declare("aDT",5) // how often to update the whole arm apparatus
+declare("amoveDT",50) // how often to update the arm's position
+declare("mcmdspkwd",40) // motor command spike window; how wide to make the counting window (in ms)
+declare("EMlag",50) // lag between EM commands (at neuromuscular junction) and arm update
+declare("lastmovetime",0) // when was the last arm move (in ms)?
+declare("spdDT",50) // how often to update the muscle spindles (DP cells)
+declare("DPlag",25) // lag between arm movement and DP update
+declare("lastspdupdate",0) // when was the last spindle update (in ms)?
+declare("rlDT",50) // how often to check RL status
+declare("lastrlupdate",0) // when was the last RL update (in ms)?
+maxplastt_INTF6=rlDT + 50
+//maxplastt_INTF6=50
+declare("minRLerrchange",0.01) // minimum error change visible to RL algorithm
+                               // (units in Cartesian coordinates)
+declare("lrec","o[2]") // recording from ES, EM
+declare("vEM",new Vector())
+declare("armAng","d[2]","armPos",new p2d(),"ePos",new p2d(),"tPos",new p2d())
+declare("tAng","d[2]") // target angle
+declare("sAng","d[2]") // starting angle
+declare("APHASE",0,"AMOVE",0,"AHOLD",1,"ARESET",2,"HoldDur",400,"MoveDur",300,"ResetDur",100)
+declare("DoLearn",4,"DoReset",2,"DoAnim",1,"DoRDM",2)
+declare("RLMode",3)  // reinforcement learning mode (0=none,1=reward,2=punishment,3=reward+punishment)
+declare("ATYP",new List())
+declare("SUBPHASE",0)
+declare("ardm",new Random(),"aseed",913015) // for random set of arm pos during training
+declare("pnq","o[2]")
+declare("DiffRDEM",0) // whether to take difference from last activity when reading out EM activity
+declare("nqsy","o[2]") // for recording synaptic weights over time --  only saves L5 cell synapses
+declare("syDT",1000) // dt for recording synaptic weights into nqsy -- only used when syDT>0
+// syDT set to 1000 usually, syDT = 50 when good detail needed
+declare("lastsysave",0) // when was the nqsy synaptic weight recording (in ms)?
+declare("shlock",1) // whether to lock shoulder
+declare("ellock",0) // whether to lock elbow
+declare("targid",3)  // target ID for target to set up
+sprint(tstr,"o[%d][%d]",CTYPi+1,CTYPi+1)
+declare("lssyavg",tstr) // list of average synaptic weights vs time for a particular population
+declare("angErr",0) // whether to use diff btwn targ and arm angle for error -- defaults to 0==cartesian error
+declare("HoldStill",0) // whether to hold the arm still - useful for debugging EM output at a given position
+// declare("AdaptLearn",0) // whether to modulate learning level by distance from target
+
+//* updateMLen - update muscle lengths based on current angles
+proc updateMLen () {
+  // Shoulder extensor muscle length is upper-arm length under maximum flex,
+  // zero under minimum flex.
+  MLen[0] = armLen[0] * (armAng[0] - minang[0]) / (maxang[0] - minang[0])
+
+  // Shoulder flexor muscle length is upper-arm length under minimum flex,
+  // zero under maximum flex.
+  MLen[1] = armLen[0] - MLen[0]
+
+  // Elbow extensor muscle length is forearm length under maximum flex,
+  // zero under minimum flex.
+  MLen[2] = armLen[1] * (armAng[1] - minang[1]) / (maxang[1] - minang[1])
+
+  // Elbow flexor muscle length is forearm length under minimum flex,
+  // zero under maximum flex.
+  MLen[3] = armLen[1] - MLen[2]
+}
+
+//* resetarm - put arm in starting position
+proc resetarm () { local dr0,dr1
+  armAng[0] = sAng[0]
+  armAng[1] = sAng[1]
+
+  dr0 = deg2rad(armAng[0]) // convert to radians
+  dr1 = deg2rad(armAng[1])
+
+  ePos.x = armLen[0] * cos(dr0) // end of elbow
+  ePos.y = armLen[0] * sin(dr0)
+
+  armPos.x = ePos.x + armLen[1] * cos(dr0 + dr1) // wrist=arm position
+  armPos.y = ePos.y + armLen[1] * sin(dr0 + dr1)
+
+  vEM.fill(0)
+  updateMLen()
+}
+
+//* initarmang - init arm angles - checks lock variables
+proc initarmang () {
+  if(shlock) {  // shoulder-lock configuration
+    minang[0] = -15.1
+    maxang[0] = -14.9
+    minang[1] = 0
+    maxang[1] = 135
+    sAng[0] = -15
+    sAng[1] = 90 
+  } else if(ellock) { // elbow-lock straight-arm configuration
+    minang[0] = -45
+    maxang[0] = 135
+    minang[1] = -0.1
+    maxang[1] = 0.1
+    sAng[0] = 45
+    sAng[1] = 0 
+  } else {
+    minang[0] = -45
+    maxang[0] = 135
+    minang[1] = 0
+    maxang[1] = 135
+    sAng[0] = 0
+    sAng[1] = 90
+  }
+// remove
+//  sAng[0] = -15
+//  sAng[1] = 65 
+}
+
+//* assignDP - 
+proc assignDP () { local ii,jj,shmlenrangewid,elmlenrangewid,shminmlen,shmaxmlen,elminmlen,elmaxmlen localobj xo
+  {nqsdel(nqDP) nqDP = new NQS("col","id","ty","mid","mids","MLmin","MLmax") nqDP.strdec("mids")}
+
+  // Calculate the width of each subrange.
+  shmlenrangewid = armLen[0] / (cedp.count() / NMUSCLES)
+  elmlenrangewid = armLen[1] / (cedp.count() / NMUSCLES)
+
+  // Initialize the subrange bounds to the first subrange.
+  shminmlen = 0
+  shmaxmlen = shmlenrangewid
+  elminmlen = 0
+  elmaxmlen = elmlenrangewid
+
+  // Loop over the different subranges...
+  for ii=0,cedp.count() / NMUSCLES - 1 {
+    // For the shoulder cells...
+    for jj=0,1 {
+      // Set the muscle length range in the particular cell.
+//      {xo=cedp.o(ii*NMUSCLES+jj) xo.setmlenrange(shminmlen,shmaxmlen)}
+      // Set the range out of kilter so the shoulder cells are unresponsive.
+      {xo=cedp.o(ii*NMUSCLES+jj) xo.setmlenrange(-2,-1)}
+
+      // Add the muscle length bounds to the DP NQS table.
+      nqDP.append(1,xo.id,DP,xo.zloc,MTYP.o(xo.zloc).s,shminmlen,shmaxmlen)
+    }
+    // For the elbow cells...
+    for jj=2,3 {
+      // Set the muscle length range in the particular cell.
+      {xo=cedp.o(ii*NMUSCLES+jj) xo.setmlenrange(elminmlen,elmaxmlen)}
+
+      // Add the muscle length bounds to the DP NQS table.
+      nqDP.append(1,xo.id,DP,xo.zloc,MTYP.o(xo.zloc).s,elminmlen,elmaxmlen)
+    }    
+
+    // Move to the next subrange.
+    shminmlen += shmlenrangewid
+    shmaxmlen += shmlenrangewid
+    elminmlen += elmlenrangewid
+    elmaxmlen += elmlenrangewid
+  }
+}
+
+//* initarm - init arm location/params
+proc initarm () { local ii
+  armLen[0] = 1 // shoulder to forearm
+  armLen[1] = 2 // forearm to wrist
+  for ii=0,1 rotfctr[ii] = 1 // max of 1 degrees
+  initarmang() // initialize arm angles, checks lock variables
+  assignDP() // assign DP responsiveness, store info in nqDP
+  resetarm()
+}
+
+//* mkmyTYP - set up names of muscle groups and phases
+proc mkmyTYP () {
+  MTYP=new List()
+  MTYP.append(new String("shext"))
+  MTYP.append(new String("shflex"))
+  MTYP.append(new String("elext"))
+  MTYP.append(new String("elflex"))
+  ATYP=new List()
+  ATYP.append(new String("Move"))
+  ATYP.append(new String("Hold"))
+  ATYP.append(new String("Reset"))
+}
+
+//* recE - set up recording from E cells
+proc recE () {
+  lrec[0] = mkrecl(col[0],ES)
+  lrec[1] = mkrecl(col[0],EM)
+}
+
+//* assignEM()
+proc assignEM () { local i,ct,mid,a localobj vty
+  {nqsdel(nqE) nqE = new NQS("col","id","ty","mid","mids") nqE.strdec("mids")}
+  a=allocvecs(vty)
+  vty.append(EM)
+  nqE.clear(col[0].numc[EM])
+  for vtr(&ct,vty) for i=col[0].ix[ct],col[0].ixe[ct] {
+    mid = i%4
+    nqE.append(1,i,ct,mid,MTYP.o(mid).s)
+  }
+  dealloc(a)
+}
+
+//* readoutEM - read activity from EM - store results in vEM
+proc readoutEM () { local i,idx,ldx,sz
+  vEM.resize(MTYP.count) vEM.fill(0) ldx=1
+  for i=0,nqE.v.size-1 {    
+    idx=nqE.v[1].x(i)-col[0].ix[EM]
+    vEM.x(nqE.v[3].x(i)) += lrec[ldx].o(1).o(idx).size
+    lrec[ldx].o(1).o(idx).resize(0) // reset to 0
+  }
+  if(DiffRDEM) {
+    sz=nqa.v.size
+    if(sz) {
+      vEM.x(0) -= nqa.v[5].x(sz-1)
+      vEM.x(1) -= nqa.v[6].x(sz-1)
+      vEM.x(2) -= nqa.v[7].x(sz-1)
+      vEM.x(3) -= nqa.v[8].x(sz-1)
+      for i=0,3 if(vEM.x(i) < 0) vEM.x(i) = 0
+    }
+  }
+}
+
+//* getarmX(shoulder angle in radians, elbow angle in radians) -
+// gets the end effector x coordinate
+func getarmX () { local ex
+  ex = armLen[0] * cos($1) // end of elbow
+  return ex + armLen[1] * cos($1+$2) // wrist=arm position
+}
+
+//* getarmY(shoulder angle in radians, elbow angle in radians) -
+// gets the end effector y coordinate
+func getarmY () { local ey
+  ey = armLen[0] * sin($1)
+  return ey + armLen[1] * sin($1+$2)
+}
+
+//* clampval(pointer to value, min value, max value) - clamps value to min,max
+proc clampval () { local val
+  $&1 = MAXxy($&1,$2)
+  $&1 = MINxy($&1,$3)
+}
+
+//* rotArm(angle0,angle1) - rotate arm by angle0,angle1
+proc rotArm () { local dsh,delb,dr0,dr1
+  dsh=$1 delb=$2
+  armAng[0] += dsh // inc angles
+  armAng[1] += delb
+  for i=0,1 clampval(&armAng[i],minang[i],maxang[i])
+
+  dr0 = deg2rad(armAng[0]) // convert to radians
+  dr1 = deg2rad(armAng[1])
+
+  ePos.x = armLen[0] * cos(dr0) // end of elbow
+  ePos.y = armLen[0] * sin(dr0)
+
+  armPos.x = ePos.x + armLen[1] * cos(dr0 + dr1) // wrist=arm position
+  armPos.y = ePos.y + armLen[1] * sin(dr0 + dr1)
+
+  updateMLen() // update the muscle lengths
+}
+
+//* rotArmTo(angle0,angle1) - rotate the arm to angle0,angle1
+proc rotArmTo () { local dsh,delb
+  dsh = $1 - armAng[0]
+  delb = $2 - armAng[1]
+  rotArm(dsh,delb)
+}
+
+//* getArmErr - gets current error in position
+func getArmErr () { 
+  if(angErr) {
+    // error as squared difference between joint and target angles
+    return (armAng[0] - tAng[0])^2 + (armAng[1] - tAng[1])^2
+  } else {
+    // error as Cartesian distance between hand position and target position
+    return sqrt((armPos.x - tPos.x)^2 + (armPos.y - tPos.y)^2)
+  }
+}
+
+//* holdArmPos - hold arm position at target location
+proc holdArmPos () { local dsh,delb,ph,err
+  if(numarg()>=2) {
+    dsh = $1 - armAng[0]
+    delb = $2 - armAng[1]
+    if(numarg()>2) ph=$3 else ph=AMOVE
+  } else {
+    ph = AHOLD
+    dsh = tAng[0] - armAng[0]
+    delb = tAng[1] - armAng[1]
+    if(APHASE == AMOVE) return // last event on queue for hold gets skipped
+  }
+
+  rotArm(dsh,delb)
+
+  err = getArmErr() // gets error in position
+
+  nqa.append(t,armAng[0],armAng[1],armPos.x,armPos.y,vEM.x(0),vEM.x(1),vEM.x(2),vEM.x(3),ePos.x,ePos.y,ph,MLen[0],MLen[1],MLen[2],MLen[3],SUBPHASE,err)
+  if(DoAnim) drarm()
+}
+
+//* setArmPos - set/save arm position using new joint angles, based on M1 activity in vEM
+proc setArmPos () { local dsh,delb,ph,err
+  if (numarg()>0) ph=$1 else ph=AMOVE
+  dsh = rotfctr[0] * (vEM.x(1) - vEM.x(0)) // should use a sigmoid (?)
+  delb = rotfctr[1] * (vEM.x(3) - vEM.x(2))
+
+  if(!HoldStill) rotArm(dsh,delb)
+
+  err = getArmErr() // gets error in position
+
+  // Add a position entry to nqa.
+  nqa.append(t,armAng[0],armAng[1],armPos.x,armPos.y,vEM.x(0),vEM.x(1),vEM.x(2),vEM.x(3),ePos.x,ePos.y,APHASE,MLen[0],MLen[1],MLen[2],MLen[3],SUBPHASE,err)
+}
+
+//* updateDP - update the DP cell drive
+proc updateDP () { local mlentime,nqarow,nqcnum localobj xo
+  //print "updateDP , t = " , t
+
+  // The first argument is the time at which to read muscle lengths.  If none 
+  // is provided, the default is the current time.
+  if (numarg() > 0) {
+    mlentime = $1 
+    nqa.verbose = 0
+    nqarow = nqa.select("t","<=",mlentime) - 1
+    nqa.tog()
+    nqa.verbose = 1
+  } else {
+    mlentime = t
+  }
+
+  // Remember that we update the DP cells in nqaupd.
+  nqcnum = nqaupd.fi("spupd")
+  nqaupd.v[nqcnum].x(nqaupd.v.size-1) = 1
+
+  // Loop over all DP cells and update them.
+  nqcnum = nqa.fi("ML0")
+  for ltr(xo,cedp) {
+    if (mlentime == t) {
+      // Call the cell update, having it use the current MLen[zloc].
+      xo.updatedrive()
+    } else {
+      // Call the cell update passing in the appropriate muscle length.
+      xo.updatedrive(nqa.v[nqcnum+xo.zloc].x(nqarow))
+    }
+  }
+}
+
+//* resetArmPos - put arm back in starting position, updating nqa and vEM settings
+proc resetArmPos () {
+  if(DoReset == 1) {
+    holdArmPos(sAng[0],sAng[1],ARESET)
+  } else if(DoReset==2) {
+    holdArmPos(ardm.discunif(minang[0],maxang[0]),ardm.discunif(minang[1],maxang[1]),ARESET)
+  }
+}
+
+//* LearnON - turn on learning
+proc LearnON () {
+  plaststartT_INTF6 = 0
+  plastendT_INTF6 = tstop * 2
+}
+
+//* LearnOFF - turn off learning
+proc LearnOFF () {
+  plaststartT_INTF6 = tstop * 2
+  plastendT_INTF6 = tstop * 3
+}
+
+//* svsywts - save synaptic weights from L5 cells
+proc svsywts () { local i,a localobj xo,vwg,vtau,vinc,vmaxw,vidx,vt,vpre
+  // print "svsywts: t " , t
+  a=allocvecs(vidx,vwg,vtau,vinc,vmaxw,vt,vpre)
+  for ltr(xo,col[0].ce) {
+    if(xo.type==ES) {
+      vrsz(xo.getdvi(vidx),vwg,vtau,vinc,vmaxw,vt,vpre)
+      xo.getplast(vwg,vtau,vinc,vmaxw) // get current weight gains    
+      vt.fill(t) //time
+      vpre.fill(xo.id) //presynaptic id
+      nqsy.v[0].append(vpre)
+      nqsy.v[1].append(vidx)
+      nqsy.v[2].append(vwg)
+      nqsy.v[3].append(vt)
+    }
+  }
+  dealloc(a)
+}
+
+//* RLUpdate - reinforcement learning updateupdate
+proc RLUpdate () { local err1,err2,nqcnum
+  // If we have at least 2 nqa entries...
+  if (nqa.v.size > 1) {
+    // Find the distance error of the 2nd-to-last hand position (in 
+    // nqa) from the target hand position.
+    err1 = nqa.getcol("err").x(nqa.v.size-2)
+
+    // Find the distance error of the last hand position (in 
+    // nqa) from the target hand position.
+    err2 = nqa.getcol("err").x(nqa.v.size-1)
+
+    if(verbosearm) print "err1 : ", err1, " err2 " , err2
+    if(DoLearn==2) {
+      if(err2< err1) LearnON() else LearnOFF()
+    } else if(DoLearn==3) { // RL with STDP erasure if go wrong way
+      if(err2 >= err1) {
+        setplastnq(pnq[0],col[0])
+      } 
+      nqsdel(pnq[0])
+      pnq[0]=getplastnq(col[0])
+    } else if ((DoLearn == 4) && (RLMode > 0)) { // RL with dopamine
+      nqcnum = nqaupd.fi("reinf")
+      if ((err1 - err2 >= minRLerrchange) && ((RLMode == 1) || (RLMode == 3))) {
+        // if(AdaptLearn) EPOTW_INTF6 = (err1 - err2) / err1 // else EPOTW_INTF6=1
+        col[0].ce.o(0).dopelearn(1)                // LTP
+        nqaupd.v[nqcnum].x(nqaupd.v.size - 1) = 1  // put in nqaupd
+      } else if ((err2 - err1 >= minRLerrchange) && ((RLMode == 2) || (RLMode == 3))) {
+        // if(AdaptLearn) EDEPW_INTF6 = (err2 - err1) / err1 // else EDEPW_INTF6=1
+        col[0].ce.o(0).dopelearn(-1)               // LTD
+        nqaupd.v[nqcnum].x(nqaupd.v.size - 1) = -1 // put in nqaupd
+      }
+    }
+  }
+}
+
+//* resetPhase - check which movement phase (move or hold) and set plasticity params
+proc resetPhase () { local md
+  SUBPHASE = 0
+  if(APHASE==AMOVE) { // phase was move, now set to hold/learn
+    APHASE = AHOLD
+    cvode.event(t+HoldDur,"resetPhase()")
+    LearnON()
+  } else if(APHASE==AHOLD) { // phase was hold/learn
+    LearnOFF() // turn off learning
+    if(DoReset) {
+      APHASE = ARESET // now set to reset
+      cvode.event(t+ResetDur,"resetPhase()")
+    } else {
+      APHASE = AMOVE // now set to move
+      if(DoRDM==2) {
+        md = MAXxy(aDT,aDT*int(ardm.negexp(MoveDur/aDT)))
+        cvode.event(t+md,"resetPhase()")
+      } else {
+        cvode.event(t+MoveDur,"resetPhase()")
+      }
+    }
+  } else if(APHASE==ARESET) { // phase waws reset, now set to move
+    APHASE = AMOVE
+    if(DoRDM==2) {
+      md = MAXxy(aDT,aDT*int(ardm.negexp(MoveDur/aDT)))
+      cvode.event(t+md,"resetPhase()")
+    } else {
+      cvode.event(t+MoveDur,"resetPhase()")
+    }
+  }
+  print "t : ", t , " set phase to ", ATYP.o(APHASE).s
+}
+
+//* updateArm - update all arm apparatus
+// This includes muscle commands, joints, muscle spindles,
+// and reinforcement learning signals.
+proc updateArm () { local err,nqcnum
+//  print "updateArm , t = " , t
+  // Read the M1 muscle group command spike counts since updateArm() call.
+  // These go into vEM.
+  readoutEM()
+
+  // Zero out the shoulder motor commands.
+  vEM.x(0) = 0
+  vEM.x(1) = 0
+
+  // If we are at the beginning of the simulation...
+  if (t == aDT) {
+    // Set up an arm update entry for t=0.
+    nqaupd.append(0,0,0,0,0,0,0,0)
+
+    // Set up an arm position entry for t=0.
+    err = getArmErr()
+    nqa.append(0,armAng[0],armAng[1],armPos.x,armPos.y,vEM.x(0),vEM.x(1),vEM.x(2),vEM.x(3),ePos.x,ePos.y,APHASE,MLen[0],MLen[1],MLen[2],MLen[3],SUBPHASE,err)
+
+    updateDP() // Set up the initial DP cell activity.
+
+//    cvode.event(t+100000,"updateTarget()") // Post the next updateTarget() event.
+  }
+  // Add vEM to the muscle commands part of the arm update table, nqaupd.
+  nqaupd.append(t,vEM.x(0),vEM.x(1),vEM.x(2),vEM.x(3),0,-1,0)
+
+  // If it's time for another arm motion...
+  if ((t - lastmovetime >= amoveDT) && (t >= mcmdspkwd + EMlag)) {
+    // Get all of the motor command entries in a window mcmdspkwd ms wide, back
+    // EMlag ms from the current time t.
+    // NOTE: The window here is the right width, but the boundaries are not quite
+    // what you'd expect for spike times.  Example, if the nqa entry is at t=100 ms, 
+    // mcmdspkwd = 40 ms, and EMlag = 50 ms, and the nqaupd entries are once every 
+    // 5 ms, then you might think that tallied range from t=10 ms to t=50 ms.  In
+    // fact, nqaupd entries: 10,15,20,25,30,35,40,45 are chosen which means that 
+    // the actual spike times are from t=5 to 45 ms.
+    // GLC 4/17/12: The "[)" should maybe be changed to "(]" post-paper.
+    nqaupd.verbose = 0
+    nqaupd.select("t","[)",t-mcmdspkwd-EMlag,t-EMlag)
+
+    // Set vEM to the sum of each of the relevant motor command entries.
+    vEM.x(0) = nqaupd.getcol("shext").sum()
+    vEM.x(1) = nqaupd.getcol("shflex").sum()
+    vEM.x(2) = nqaupd.getcol("elext").sum()
+    vEM.x(3) = nqaupd.getcol("elflex").sum()
+
+    // Set the database back.
+    nqaupd.tog()
+    nqaupd.verbose = 1
+
+    setArmPos()         // Set the arm position.
+    if (DoAnim) drarm() // Draw the arm configuration.
+    lastmovetime = t    // Remember the time of the event.
+
+    // Add the nqa row number to the nqaupd table.
+    nqcnum = nqaupd.fi("mvmt")
+    nqaupd.v[nqcnum].x(nqaupd.v.size - 1) = nqa.v.size - 1
+  }
+  // If it's time for a muscle spindle cell update...
+  if ((t - lastspdupdate >= spdDT) && (t >= DPlag)) {    
+    updateDP(t-DPlag) // Update DP cell activity.    
+    lastspdupdate = t // Remember the time of the event.
+  }
+  // If it's time for an RL update...
+  if ((DoLearn==2 || DoLearn==3 || DoLearn==4) && (t - lastrlupdate > rlDT)) {    
+    RLUpdate()       // Do an RL update.    
+    lastrlupdate = t // Remember the time of the event.
+  }
+  if (syDT > 0 && t - lastsysave >= syDT) { // time for nqsy synaptic save
+    // Remove this conditional line later...
+/*    if (t <= 10000) {
+      svsywts()      // Do a synaptic save.
+    } */
+    svsywts()      // Do a synaptic save.
+    lastsysave = t // Remember the time of the event.
+  }  
+  cvode.event(t+aDT,"updateArm()") // Post the next updateArm() event.
+}
+
+//* updateTarget - set a new target
+proc updateTarget () {
+/*  if (targid == 3) {
+    targid = 1
+  } else if (targid == 1) {
+    targid = 4
+  } else if (targid == 4) {
+    targid = 0
+  } else if (targid == 0) {
+    targid = 2
+  } else if (targid == 2) {
+    targid = 3
+  } */
+
+  if (targid == 1) {
+    targid = 2
+  } else if (targid == 2) {
+    targid = 3
+  } else if (targid == 3) {
+    targid = 4
+  } else if (targid == 4) {
+    targid = 0
+  } else if (targid == 0) {
+    targid = 1
+  }
+
+  if (targid == 0) {
+    setTarg(-15,135) // extreme flexion target
+  } else if (targid == 1) {
+    setTarg(-15,105)
+  } else if (targid == 2) {
+    setTarg(-15,75)  // normal target
+  } else if (targid == 3) {
+    setTarg(-15,35)
+  } else if (targid == 4) {
+    setTarg(-15,0)   // extreme extension target
+  }
+
+  cvode.event(t+100000,"updateTarget()") // Post the next updateTarget() event.
+}
+
+//* initArmCB - initialize arm callbacks
+proc initArmCB () { local i
+  // Set up the muscle commands NQS table.
+  nqsdel(nqaupd)
+  nqaupd = new NQS("t","shext","shflex","elext","elflex","reinf","mvmt","spupd")
+
+  // Set up the arm NQS table.
+  {nqsdel(nqa) nqa=new NQS("t","ang0","ang1","x","y","shext","shflex","elext","elflex","ex","ey","phase")}
+  nqa.resize("ML0","ML1","ML2","ML3","subphase","err")
+
+  // Clear out the current muscle command array vEM.
+  if(vEM==nil) vEM = new Vector(MTYP.count) else {vEM.resize(MTYP.count) vEM.fill(0)}
+
+  resetarm() // reset
+  cvode.event(aDT,"updateArm()")
+  if(DoLearn==3 || DoLearn==4) {
+    LearnON()
+    for i=0,numcols-1 pnq[i]=getplastnq(col[i])
+  } else LearnOFF()
+  APHASE=AMOVE
+  if(DoRDM) ardm.ACG(aseed)
+  if(DoLearn==1) cvode.event(MoveDur,"resetPhase()")    
+  SUBPHASE=0
+  if(syDT>0) {nqsdel(nqsy) nqsy=new NQS("id1","id2","wg","t") cvode.event(syDT,"svsywts()")}
+
+  lastmovetime = lastspdupdate = lastrlupdate = lastsysave = 0
+}
+
+//* mkaid - setup handlers for EM readout -> arm motion
+proc mkaid () {
+  aid = new FInitializeHandler(1,"initArmCB()") 
+}
+
+//* drarm([nqa,row from nqa,erase]) - draw arm location
+proc drarm () { local idx,ex,ey,wx,wy,ang0,ang1,ers,ln,xsz localobj nqa,s
+  ers=1 xsz=0.15
+  ln=armLen[0]+armLen[1]
+  g.size(-ln,ln,-ln,ln)
+  s=new String()
+  if(numarg()>=2) {
+    {nqa=$o1 idx=$2}
+    if(idx < 0 || idx >= nqa.v.size) {printf("drarm ERRA: invalid index: %d,%d\n",idx,nqa.v.size) return}
+    ex = nqa.v[9].x(idx)
+    ey = nqa.v[10].x(idx)
+    wx = nqa.v[3].x(idx)
+    wy = nqa.v[4].x(idx)
+    ang0 = nqa.v[1].x(idx)
+    ang1 = nqa.v[2].x(idx)
+    if(numarg()>=3)ers=$3
+    if(DoLearn) {
+      sprint(s.s,"t=%g: %g %g %s",nqa.v[0].x(idx),ang0,ang1,ATYP.o(nqa.v[11].x(idx)).s)
+    } else {
+      sprint(s.s,"t=%g: %g %g",nqa.v[0].x(idx),ang0,ang1)
+    }
+  } else {
+    if(numarg()>=1)ers=$1
+    ex = ePos.x
+    ey = ePos.y
+    wx = armPos.x
+    wy = armPos.y
+    ang0 = armAng[0]
+    ang1 = armAng[1]
+    if(DoLearn) {
+      sprint(s.s,"t=%g: %g %g %s",t,ang0,ang1,ATYP.o(APHASE).s)
+    } else {
+      sprint(s.s,"t=%g: %g %g",t,ang0,ang1)
+    }
+  }
+  if(verbose) print "ex=",ex,"ey=",ey,"ang0=",ang0,"wx=",wx,"wy=",wy,"ang1=",ang1
+  if(ers) g.erase_all()
+  drline(tPos.x-xsz,tPos.y-xsz,tPos.x+xsz,tPos.y+xsz,g,1,4) // draw an x for the target
+  drline(tPos.x-xsz,tPos.y+xsz,tPos.x+xsz,tPos.y-xsz,g,1,4)
+  drline(0,0,ex,ey,g,2,4) // draw arm
+  drline(ex,ey,wx,wy,g,3,4)
+  g.label(0.55,0.95,s.s)
+  g.flush()
+  doNotify()
+}
+
+//* nqa2gif(nqa[,inc]) - saves arm locations in nqa as gif
+// inc specifies how many frames to skip
+proc nqa2gif () { local i,j,inc localobj nqa,s
+  nqa=$o1 s=new String() j=0
+  if(numarg()>1) inc=$2 else inc=1
+  for(i=0;i<nqa.v.size;i+=inc){
+    drarm(nqa,i)
+    sprint(s.s,"xcalc2gif /u/samn/arm2d/gif/wg/%010d_nqa.gif",j)
+    system(s.s)
+    j+=1
+  }  
+}
+
+//* animnqa(nqa[,startidx,endidx,delays]) - animates contents of nqa (arm position info)
+proc animnqa () { local i,is,ie,del localobj nqa
+  nqa=$o1
+  if(numarg()>1) is=$2 else is=0
+  if(numarg()>2) ie=$3 else ie=nqa.v.size-1
+  if(numarg()>3) del=$4 else del=0.25e9
+  for i=is,ie {
+    drarm(nqa,i)
+    sleepfor(0,del)
+  }
+}
+
+//* setTarg(angle0,angle1) - set target angle
+proc setTarg () { local dr0,dr1,ex,ey
+  tAng[0] = $1
+  tAng[1] = $2
+
+  dr0 = deg2rad(tAng[0]) // convert to radians
+  dr1 = deg2rad(tAng[1])
+
+  ex = armLen[0] * cos(dr0) // end of elbow
+  ey = armLen[0] * sin(dr0)
+
+  tPos.x = ex + armLen[1] * cos(dr0 + dr1) // target position for end of arm in x,y
+  tPos.y = ey + armLen[1] * sin(dr0 + dr1)
+}
+
+//* IterTrain(number of iterations, number of increments, duration for each starting position)
+proc IterTrain () { local nangs,i,j,k,dur,niter,a localobj vinc
+  a=allocvecs(vinc) vinc.resize(2)
+  niter=$1 nangs=$2 dur=$3 resetplast_INTF6=0
+  for i=0,1 vinc.x(i) = (maxang[i]-minang[i])/nangs
+  for i=0,niter-1 {
+    print "iteration number " , i
+    for j=0,1 sAng[j] = minang[j]
+    for j=0,nangs {
+      tstop = dur
+      run()
+      for k=0,1 { // increment starting position
+        sAng[k] += vinc.x(k)
+        if(sAng[k] > maxang[k]) sAng[k]=maxang[k]
+      }
+    }
+  }
+  dealloc(a)
+}
+
+//* IterTrain2D(number of iterations, number of increments, duration for each starting position)
+proc IterTrain2D () { local nangs,i,j,k,l,dur,niter,a localobj vinc
+  a=allocvecs(vinc) vinc.resize(2)
+  niter=$1 nangs=$2 dur=$3 resetplast_INTF6=0
+  for i=0,1 vinc.x(i) = (maxang[i]-minang[i])/nangs
+  for i=0,niter-1 { sAng[0]=minang[0]
+    l=0 // subiteration counter
+    for j=0,nangs { sAng[1]=minang[1]
+      for k=0,nangs {
+        print "train: iter ", i, ", subiter ", l
+        tstop = dur
+        run()
+        sAng[1] += vinc.x(1) // inc elbow angle
+        if(sAng[1] > maxang[1]) sAng[1]=maxang[1]
+        l += 1 // subiteration
+      }
+      sAng[0] += vinc.x(0) // inc shoulder angle
+      if(sAng[0] > maxang[0]) sAng[0]=maxang[0]
+    }
+  }
+  dealloc(a)
+}
+
+//* IterTest(number of iterations, number of increments, duration for each starting position[,control])
+// NB: WHEN control==1, the weights will be reset to baseline, SO USE WITH CARE!!!!!!!!!!!!!
+obfunc IterTest () { local ii,nangs,i,j,k,dur,niter,dltmp,ctl,a localobj vinc,nqo
+  a=allocvecs(vinc) vinc.resize(2)
+  niter=$1 nangs=$2 dur=$3
+  if(numarg()>3) ctl=$4 else ctl=0
+  if(ctl) {
+    print "IterTest WARNING: reset weights to baseline!"
+    resetplast_INTF6=1
+  } else resetplast_INTF6=0
+  dltmp=DoLearn DoLearn=0 // turn off learning
+  for i=0,1 vinc.x(i) = (maxang[i]-minang[i])/nangs
+  vinc.x(0) = 0.0  // no shoulder increment
+  for i=0,niter-1 {
+    for j=0,1 sAng[j] = minang[j]
+    sAng[0] = -15.0   // hold shoulder angle at -15 degrees
+    for j=0,nangs {
+      print "test: iter ", i, ", subiter ", j
+      tstop = dur
+      run()
+      {nqa.resize("iter") nqa.pad() nqa.v[nqa.m-1].fill(i)}
+      {nqa.resize("subiter") nqa.pad() nqa.v[nqa.m-1].fill(j)}
+      {nqa.resize("sAng0") nqa.pad() nqa.v[nqa.m-1].fill(sAng[0])}
+      {nqa.resize("sAng1") nqa.pad() nqa.v[nqa.m-1].fill(sAng[1])}
+      AddCountCol(nqa)  // add spike counts
+      if(nqo==nil) {nqo=new NQS() nqo.cp(nqa)} else {nqo.append(nqa)}
+      for k=0,1 { // increment starting position
+        sAng[k] += vinc.x(k)
+        if(sAng[k] > maxang[k]) sAng[k]=maxang[k]
+      }
+    }
+  }
+  {DoLearn=dltmp dealloc(a) return nqo}
+}
+
+//* AddCountCol(nqa) - add a column of spike counts to nqa. assumes arm in same position in the nqa.
+proc AddCountCol () { local i,j,tcind,mint,maxt,nc,a localobj nqa,vcnt,vrt
+  {a=allocvecs(vcnt,vrt) nqa=$o1}
+  nc = col[0].cellsnq.size() // get the number of cells from cellsnq
+  mksnq() // make the NQS with spike info
+  {nqa.tog("DB") nqa.resize("vcnt","vrt") nqa.odec("vcnt") nqa.odec("vrt") nqa.pad()}
+  snq.verbose=0
+  vcnt.resize(nc)
+  vrt.resize(nc)
+
+  // Remember the column index for "t" in nqa.
+  tcind = nqa.fi("t")
+  
+  // Loop over all the nqa entries...
+  for i = 0, nqa.v.size-1 {
+    // If we are in the first entry (t=0)...
+    if (i == 0) {
+      // Set spike counts and rates to all zeros.
+      vcnt.resize(0)
+      vcnt.resize(nc)
+      vrt.resize(0)
+      vrt.resize(nc)
+    } else {
+      // The minimum time is the previous nqa entry time, and the max. is the current
+      // entry.
+      mint = nqa.v[tcind].x(i-1)
+      maxt = nqa.v[tcind].x(i)     
+  
+      // Loop over all cell indices...
+      for j = 0, nc - 1 {
+        // Count only those spikes from the right time interval and cell id.
+        vcnt.x(j) = snq.select("id",j,"t","(]",mint,maxt)
+
+        // Calculate the rate in spikes / s.
+        vrt.x(j) = vcnt.x(j) * 1e3 / (maxt-mint)
+      }
+    }
+
+    // Set the vcnt and vrt entries for this nqa entry.
+    nqa.set("vcnt",i,vcnt)
+    nqa.set("vrt",i,vrt)
+  }
+
+  snq.verbose=1
+  dealloc(a)
+}
+
+//* AddCountCol(nqa) - add a column of spike counts to nqa. assumes arm in same position in the nqa.
+proc AddCountColOld () { local i,mint,maxt,nc,a localobj nqa,vcnt
+  {a=allocvecs(vcnt) nqa=$o1}
+  nc = col[0].cellsnq.size() // get the number of cells from cellsnq
+  mksnq() // make the NQS with spike info
+  {nqa.tog("DB") nqa.resize("vcnt") nqa.odec("vcnt") nqa.pad()}
+  snq.verbose=0
+  vcnt.resize(nc)
+  mint=nqa.getcol("t").min
+  maxt=nqa.getcol("t").max
+  // Instead of having 1 vcnt which is padded everywhere, vcnt spike counts 
+  // should be specific to the time-interval since last nqa entry.
+  for i = 0, nc - 1 vcnt.x(i) = 1e3 * snq.select("id",i) / (maxt-mint) // count rate over full snq,nqa (units in spikes / s)
+  for i = 0, nqa.v.size-1 nqa.set("vcnt",i,vcnt)
+  snq.verbose=1
+  dealloc(a)
+}
+
+//* IterTest2D(number of iterations, number of increments, duration for each starting position[,control,savecounts])
+// NB: WHEN control==1, the weights will be reset to baseline, SO USE WITH CARE!!!!!!!!!!!!!
+// savecounts flag specifies whether to add a column to the output NQS that has # of spikes of each
+// cell at each position (a Vector column)
+obfunc IterTest2D () { local ii,nangs,i,j,k,l,dur,niter,dltmp,ctl,savec,a localobj vinc,nqo
+  a=allocvecs(vinc) vinc.resize(2)
+  niter=$1 nangs=$2 dur=$3
+  if(numarg()>3) ctl=$4 else ctl=0
+  if(numarg()>4) savec=$5 else savec=0
+  if(ctl) {
+    print "IterTest2D WARNING: reset weights to baseline!"
+    resetplast_INTF6=1
+  } else resetplast_INTF6=0
+  dltmp=DoLearn DoLearn=0 // turn off learning
+  for i=0,1 vinc.x(i) = (maxang[i]-minang[i])/nangs
+  for i=0,niter-1 { sAng[0]=minang[0]
+    l=0 // subiteration counter
+    for j=0,nangs { sAng[1]=minang[1]
+      for k=0,nangs {
+        print "test: iter ", i, ", subiter ", l
+        tstop = dur
+        run()
+        {nqa.resize("iter") nqa.pad() nqa.v[nqa.m-1].fill(i)}
+        {nqa.resize("subiter") nqa.pad() nqa.v[nqa.m-1].fill(l)}
+        {nqa.resize("sAng0") nqa.pad() nqa.v[nqa.m-1].fill(sAng[0])}
+        {nqa.resize("sAng1") nqa.pad() nqa.v[nqa.m-1].fill(sAng[1])}
+        if(savec) AddCountCol(nqa)
+        if(nqo==nil) {nqo=new NQS() nqo.cp(nqa)} else {nqo.append(nqa)}
+
+        sAng[1] += vinc.x(1) // inc elbow angle
+        if(sAng[1] > maxang[1]) sAng[1]=maxang[1]
+
+        l += 1 // subiteration
+      }
+      sAng[0] += vinc.x(0) // inc shoulder angle
+      if(sAng[0] > maxang[0]) sAng[0]=maxang[0]
+    }
+  }
+  {DoLearn=dltmp dealloc(a) return nqo}
+}
+
+//* addhyperrcols(nqs from IterTest or IterTest2D) - adds hypothetical moves/errors from
+// a IterTest with HoldStill==1, to see what the output moves would be
+// with fixed positions and then to calculate the errors
+proc addhyperrcols () { local i,s0,s1,errsh,errel,errp,sx,sy,nx,ny,err0,err1,dx,dy localobj nqo
+  nqo=$o1 nqo.tog("DB")
+  if(nqo.fi("dy")==-1) {
+    nqo.resize("dirsh","direl","errsh","errel","errp","errxy","dx","dy")
+    nqo.pad()
+  }
+  for i=0,nqo.v.size-1 {
+    dirsh = nqo.getcol("shflex").x(i) - nqo.getcol("shext").x(i) // shoulder rot command
+    direl = nqo.getcol("elflex").x(i) - nqo.getcol("elext").x(i) // elbow rot command
+    s0 = nqo.getcol("sAng0").x(i) // starting angle
+    s1 = nqo.getcol("sAng1").x(i)
+    if(abs(s0 + dirsh - tAng[0] ) < abs(s0 - tAng[0])) {
+      errsh = -abs(dirsh) // angular error was reduced
+    } else errsh = abs(dirsh) // angular error was increased
+    if(abs(s1 + direl - tAng[1] ) < abs(s1 - tAng[1])) {
+      errel = -abs(direl) // angular error was reduced
+    } else errel = abs(direl) // angular error was increased
+    errp = errsh + errel
+    
+    sx=getarmX(deg2rad(s0),deg2rad(s1)) // starting x
+    sy=getarmY(deg2rad(s0),deg2rad(s1)) // starting y
+    err0 = sqrt( (sx-tPos.x)^2 + (sy-tPos.y)^2) // starting error
+    
+    nx=getarmX(deg2rad(s0+dirsh),deg2rad(s1+direl)) // new x
+    ny=getarmY(deg2rad(s0+dirsh),deg2rad(s1+direl)) // new y
+    err1 = sqrt( (nx-tPos.x)^2 + (ny-tPos.y)^2) // error after hypothetical move
+    
+    if(err1<err0) errxy=-abs(err1-err0) else errxy=abs(err1+err0)
+
+    dx = nx - sx // delta-x 
+    dy = ny - sy // delta-y
+    
+    nqo.getcol("dirsh").x(i)=dirsh // hypothetical rotation command for shoulder
+    nqo.getcol("direl").x(i)=direl // hypothetical rotation command for elbow
+    nqo.getcol("errsh").x(i)=errsh // hypothetical error for shoulder
+    nqo.getcol("errel").x(i)=errel // hypothetical error for elbow
+    nqo.getcol("errp").x(i)=errp // total hypothetical error - useless?
+    nqo.getcol("errxy").x(i)=errxy // hypothetical cartesian error
+    nqo.getcol("dx").x(i)=dx // hypothetical move in x 
+    nqo.getcol("dy").x(i)=dy // hypothetical move in y
+  }
+}
+
+//* getnqrf([celltype,colid]) - make an NQS with approx celltype RFs -- default is for DP cells
+obfunc getnqrf () { local cdx,i,tt,tdx,id,ang0,ang1,mid,ml,ct localobj nqrf
+  nqrf=new NQS("i","id","ty","ang0","ang1","ML0","ML1","ML2","ML3","t")
+  if(numarg()>0)ct=$1 else ct=DP
+  if(numarg()>1)cdx=$2 else cdx=0
+  if(ct==DP) nqrf.resize("mid","ml")
+  if(snq[cdx]==nil) {i=CDX CDX=cdx mksnq() CDX=i}
+  nqrf.clear(snq[cdx].select("type",DP))
+  snq[cdx].tog("DB")
+  nqa.tog("DB")
+  nqa.verbose=snq[cdx].verbose=0
+  tdx=0 
+  tt=snq[cdx].getcol("t").x(0)
+  for i=1,nqa.v.size-1 {
+  if(i%10==0)printf(".")
+    while(tt < nqa.getcol("t").x(i) && tdx < snq[cdx].v.size) {
+      if(snq[cdx].getcol("type").x(tdx)==ct) {
+        id=snq[cdx].getcol("id").x(tdx)
+        ang0=nqa.getcol("ang0").x(i-1)
+        ang1=nqa.getcol("ang1").x(i-1)
+        //      cedp.o(id).subtype
+        if(ct==DP) {
+          mid=cedp.o(id-col[cdx].ix[ct]).zloc
+          ml=nqa.v[mid+12].x(i-1)
+          nqrf.append(i-1,id,ct,ang0,ang1,nqa.v[12].x(i-1),nqa.v[13].x(i-1),nqa.v[14].x(i-1),nqa.v[15].x(i-1),tt,mid,ml)
+        } else {
+          nqrf.append(i-1,id,ct,ang0,ang1,nqa.v[12].x(i-1),nqa.v[13].x(i-1),nqa.v[14].x(i-1),nqa.v[15].x(i-1),tt)
+        }
+      }      
+      tdx += 1
+      if(tdx<snq[cdx].v.size) tt=snq[cdx].getcol("t").x(tdx) else break
+    }
+  }
+  nqa.verbose=snq[cdx].verbose=1
+  return nqrf
+}
+
+//* getcellrf(nqa from IterTest2D with cell counts @ each position, cell id[,normalize]) -
+// returns an nqs with spike counts per position for a given cell
+// normalize divides by max # of spikes at a location so they're all between 0 and 1
+obfunc getcellrf () { local id,x,y,r,cnt,nrm,a localobj nq,vx,vy,vcnt,nqrf,ls,mc
+  nq=$o1 id=$2 if(numarg()>2)nrm=$3 else nrm=1
+  a=allocvecs(vx,vy,vcnt)
+  vrsz(nq.getcol("x").uniq,vx,vy)
+  nq.getcol("x").uniq(vx)
+  nq.getcol("y").uniq(vy)
+  nqrf=new NQS("x","y","cnt")
+  for i=0,nq.v.size-1 {
+    x = nq.getcol("x").x(i)
+    y = nq.getcol("y").x(i)
+    cnt=nq.get("vcnt",i).o.x(id)
+    if(nqrf.select(-1,"x",x,"y",y)) {
+// The line below doesn't make sense if vcnt counts span all times in snq.
+      nqrf.v[2].x(nqrf.ind.x(0)) += cnt
+    } else nqrf.append(x,y,cnt)
+  }
+  dealloc(a)
+  if(nrm) nqrf.getcol("cnt").div(nqrf.getcol("cnt").max())
+  return nqrf
+}
+
+//* drcellrf(nqs from getcellrf[,sz]) - draws the count per position using data from the nqs
+// green dots are starting x,y . blue is ending. red line height is # spikes @ x,y.
+// sz is the height,width of markers for the x,y positions
+// the nqs ($o1) is obtained from getcellrf
+proc drcellrf () { local i,x,y,n,sz localobj nqr
+  nqr=$o1
+  if(numarg()>1)sz=$2 else sz=0.01
+  for i=0,nqr.v.size-1 {
+    x = nqr.v[0].x(i)
+    y = nqr.v[1].x(i)
+    n = nqr.v[2].x(i)
+    drline(x,y,x,y+n,g,2,3)
+    drline(x-sz,y-sz,x+sz,y-sz,g,4,3)
+    drline(x-sz,y+n+sz,x+sz,y+n+sz,g,3,3)
+  }
+}
+
+//
+// Analysis functions (adding these here to avoid putting them always in notebook)
+//
+
+//* drelbowtrajectory -- show the elbows trajectory vs. the target angle
+proc drelbowtrajectory () {
+  if(numarg()>0) g.erase_all()
+  nqa.gr("ang1","t",0,3,0)
+  drline(0,tAng[1],t,tAng[1],g,3,2)
+  drline(0,minang[1],t,minang[1],g,1,3)
+  drline(0,maxang[1],t,maxang[1],g,1,3)
+}
+
+//* drshouldertrajectory -- show the shoulder's trajectory vs. the target angle
+proc drshouldertrajectory () {
+  if(numarg()>0) g.erase_all()
+  nqa.gr("ang0","t",0,2,0)
+  drline(0,tAng[0],t,tAng[0],g,2,2)
+  drline(0,minang[0],t,minang[0],g,9,3)
+  drline(0,maxang[0],t,maxang[0],g,9,3)
+}
+
+//* addnqacol2nqaupd
+proc addnqacol2nqaupd () { local nqcnum,nqcnum2,nqcnum3,nqaind,ii
+  nqaupd.resize($s1)                    // add column to look at
+  nqcnum = nqaupd.fi($s1)
+  nqcnum2 = nqaupd.fi("mvmt")
+  nqcnum3 = nqa.fi($s1)
+  nqaupd.v[nqcnum].resize(nqaupd.v.size)  // pad the column with zeros
+  nqaind = -1
+  for ii=0,nqaupd.v.size-1 {
+    if ((nqaupd.v[nqcnum2].x(ii) != -1) && (nqaupd.v[nqcnum2].x(ii) != nqaind)) {
+      nqaind = nqaupd.v[nqcnum2].x(ii)
+    }
+    nqaupd.v[nqcnum].x(ii) = nqa.v[nqcnum3].x(nqaind)
+  }
+}
+
+//* getavgsyvst(nqsy,ty1,ty2[,CDX]) - get average synaptic weight vs time
+obfunc getavgsyvst () { local i,ty1,ty2,cdx localobj ls,vt,vwg,nqsy,vids
+  // Read the parameters in.
+  nqsy=$o1 ty1=$2 ty2=$3 if(numarg()>3) cdx=$4 else cdx=0
+
+  // Create a new list containing a Vector of times vt and average weights vwg.
+  ls=new List()
+  ls.append(vt=new Vector(nqsy.v.size))
+  ls.append(vwg=new Vector(nqsy.v.size))
+
+  vwg.resize(0)
+  nqsy.tog("DB")
+  nqsy.getcol("t").uniq(vt)
+  nqsy.verbose=0
+  
+  // If we are not mapping to EM, do the normal method if getting the means.
+  if (ty2 != EM) {
+    for vtr(&i,vt) if(nqsy.select("t",i,"id1","[]",col[cdx].ix[ty1],col[cdx].ixe[ty1],"id2","[]",col[cdx].ix[ty2],col[cdx].ixe[ty2])) {
+      vwg.append(nqsy.getcol("wg").mean)
+    }
+  // Otherwise, do the method that eliminates the shoulder EM cells.
+  } else {
+    // Set up a vector that just has the cell IDs that are elbow-related.
+    vids = new Vector(0)
+    for i=col[cdx].ix[ty2],col[cdx].ixe[ty2] {
+      if ((i - col[cdx].ix[ty2]) % 4 > 1) vids.append(i)
+    }
+    for vtr(&i,vt) if(nqsy.select("t",i,"id1","[]",col[cdx].ix[ty1],col[cdx].ixe[ty1],"id2","EQW",vids)) {
+      vwg.append(nqsy.getcol("wg").mean)
+    }
+  }
+  nqsy.verbose=1
+  return ls // return list with vector of times and average weights
+}
+
+//* mkavgsyvst(nqsy)
+proc mkavgsyvst () { local i,j localobj str,nqsy
+  str=new String() nqsy=$o1
+  for case(&i,ES) for case(&j,EM) if(pmat[0][0][i][j]) {
+    print CTYP.o(i).s,"->",CTYP.o(j).s
+    lssyavg[i][j] = getavgsyvst(nqsy,i,j)
+    sprint(str.s,"%s->%s",CTYP.o(i).s,CTYP.o(j).s)
+    lssyavg[i][j].o(1).label(str.s)
+  }
+}
+
+//* drxyvecfield(nqo) - draw xy trajectory from IterTest or IterTest2D NQS
+// that had addhyperrefcol called on it - this NQS should be generated
+// post learning with HoldStill set to 1
+proc drxyvecfield () { local eidx,i,x0,y0,x1,y1,xsz,a localobj vx1,vy1,vx2,vy2,nqo
+  nqo=$o1
+  {a=allocvecs(vx1,vx2,vy1,vy2) vrsz(0,vx1,vx2,vy1,vy2)}
+  {nqo.verbose=0 nqo.tog("DB") eidx=nqo.getcol("subiter").max()}
+  for i=0,eidx if(nqo.select("subiter",i)) {
+    x0 = nqo.getcol("x").mean()
+    y0 = nqo.getcol("y").mean()
+    x1 = x0 + nqo.getcol("dx").mean()
+    y1 = y0 + nqo.getcol("dy").mean()
+    drline(x0,y0,x1,y1,g,2,3)
+    {vx1.append(x0) vy1.append(y0) vx2.append(x1) vy2.append(y1)}
+  }
+  nqo.verbose=1
+  vy1.mark(g,vx1,"O",6,4,1) // start  (green)
+  vy2.mark(g,vx2,"O",6,3,1) // end    (blue)
+  xsz=0.1
+  drline(tPos.x-xsz,tPos.y-xsz,tPos.x+xsz,tPos.y+xsz,g,1,4) // draw an x for the target
+  drline(tPos.x-xsz,tPos.y+xsz,tPos.x+xsz,tPos.y-xsz,g,1,4)
+  dealloc(a)
+}
+
+//* drrotvecfield(nqo[,xsz]) - draw angular trajectory from IterTest or IterTest2D NQS
+// that had addhyperrefcol called on it - this NQS should be generated
+// post learning with HoldStill set to 1. xsz is size of target
+proc drrotvecfield () { local eidx,i,s0,s1,n0,n1,xsz,a localobj vx1,vy1,vx2,vy2,nqo
+  {nqo=$o1 a=allocvecs(vx1,vx2,vy1,vy2) vrsz(0,vx1,vx2,vy1,vy2)}
+  {nqo.verbose=0 nqo.tog("DB") eidx=nqo.getcol("subiter").max()}
+  for i=0,eidx if(nqo.select("subiter",i)) {
+    s0 = nqo.getcol("sAng0").mean()
+    s1 = nqo.getcol("sAng1").mean()
+    n0 = s0 + nqo.getcol("dirsh").mean()
+    n1 = s1 + nqo.getcol("direl").mean()
+    drline(s0,s1,n0,n1,g,2,3)
+    {vx1.append(s0) vy1.append(s1) vx2.append(n0) vy2.append(n1)}
+  }
+  nqo.verbose=1
+  vy1.mark(g,vx1,"O",6,4,1) // start  (green)
+  vy2.mark(g,vx2,"O",6,3,1) // end    (blue)
+  if(numarg()>1) xsz=$2 else xsz=5
+  drline(tAng[0]-xsz,tAng[1]-xsz,tAng[0]+xsz,tAng[1]+xsz,g,1,4) // draw an x for the target
+  drline(tAng[0]-xsz,tAng[1]+xsz,tAng[0]+xsz,tAng[1]-xsz,g,1,4)
+  dealloc(a)
+}
+
+//* run and init nqs objects
+proc myrun () { local i localobj xo
+  run()    // Do the normal run.
+  // For all of the columns, make spike NQS tables, snq[].
+  for CDX=0,numcols-1 {
+    {nqsdel(snq[CDX]) snq[CDX]=SpikeNQS(vit[CDX].tvec,vit[CDX].vec,col[CDX])}
+    snq[CDX].marksym="O"
+    print "CDX:",CDX
+    pravgrates()  // Show average firing rates for each column.
+  }
+  CDX=0 // Load the analysis tables for column 0.
+  initMyNQs()
+  // make all of the usual analysis tables.
+  // initAllMyNQs()
+  // make all of the desired synaptic weights.
+  if(syDT) mkavgsyvst(nqsy)
+}
+
+//* mysv - save output after myrun
+proc mysv () { localobj s,nq
+  s = new String()
+  CDX=0
+  // Save the snq for column 0.
+  sprint(s.s,"data/%s_%s_snq.nqs",$s1,col[CDX].name)
+  {snq[CDX].tog("DB") snq[CDX].sv(s.s)}
+
+  // Save the global LFP for column 0.
+/*  sprint(s.s,"data/%s_%s_LFP.nqs",$s1,col[CDX].name)
+  {nqLFP[CDX].tog("DB") nqLFP[CDX].sv(s.s)} */
+
+  // Save the nqa table.
+  {sprint(s.s,"data/%s_nqa.nqs",$s1) nqa.tog("DB") nqa.sv(s.s)}
+
+  // Save an nq for the average synaptic weight changes.
+  if(syDT) {
+    nq = new NQS("t","EStoEMavgwtgn")
+    nq.setcol("t",lssyavg[ES][EM].o(0))
+    nq.setcol("EStoEMavgwtgn",lssyavg[ES][EM].o(1))
+    sprint(s.s,"data/%s_EStoEMavgwtgn.nqs",$s1)
+    {nq.tog("DB") nq.sv(s.s)}
+    nqsdel(nq)
+  }
+/*
+  {sprint(s.s,"/u/samn/intfstdp/data/%s_snq.nqs",$s1) snq.tog("DB") snq.sv(s.s)}
+  if(nqrat!=nil) {
+    {sprint(s.s,"/u/samn/intfstdp/data/%s_nqrat.nqs",$s1) nqrat.tog("DB") nqrat.sv(s.s)}
+  }
+  if(mynqp.size>0) {
+    {sprint(s.s,"/u/samn/intfstdp/data/%s_mynqp.nqs",$s1) mynqp.tog("DB") mynqp.sv(s.s)}
+  }
+  {nqsdel(wgnq) wgnq=mkwgnq(col) sprint(s.s,"/u/samn/intfstdp/data/%s_wgnq.nqs",strv) wgnq.sv(s.s)} */
+}
+
+//* myrunsv(simstr) - run & save output
+proc myrunsv () { 
+  myrun()
+  mysv($s1)
+}
+
+//* mytrainrunsv(simstr[,iters,numlevels,dur,twod]) - run with training and save weights
+proc mytrainrunsv () { local iters,nl,dur,twod localobj str
+
+  str=new String2()
+
+  if(numarg()>1) iters=$2 else iters=100
+  if(numarg()>2) nl=$3 else nl=15
+  if(numarg()>3) dur=$4 else dur=10e3
+  if(numarg()>4) twod=$5 else twod=0
+
+  sprint(str.s,"/u/samn/arm2d/data/%s_scale%d_iters%d_nlevels%d_dur%g_twod%d",$s1,scale,iters,nl,dur,twod)
+
+  if(twod) IterTrain2D(iters,nl,dur) else IterTrain(iters,nl,dur)
+
+  {nqsdel(nq[0]) nq[0]=mkwgnq(col[0]) sprint(str.t,"%s_wgnq_A1.nqs",str.s) nq[0].sv(str.t)}
+  print "saved ", str.t
+  {nqsdel(nq[1]) nq[1]=getplastnq(col[0]) sprint(str.t,"%s_plastnq_A2.nqs",str.s)  nq[1].sv(str.t)}
+  print "saved ", str.t
+}
+
+//* func calls
+
+mkmyTYP()
+initarm()
+assignEM()
+recE()
+mkaid()
+if (targid == 0) {
+  setTarg(-15,135) // extreme flexion target
+} else if (targid == 1) {
+  setTarg(-15,105)
+} else if (targid == 2) {
+  setTarg(-15,75)  // normal target
+} else if (targid == 3) {
+  setTarg(-15,35)
+} else if (targid == 4) {
+  setTarg(-15,0)   // extreme extension target
+}
+//setTarg(45,0)  // straight arm locked-elbow target
+if(DoAnim) gg()
+LearnOFF() // start with no learning

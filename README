@@ -1,0 +1,48 @@
+This code generates figures related to the model defined in
+
+Chadderdon GL, Neymotin SA, Kerr CC, Lytton WW (2012) 
+Reinforcement learning of targeted movement in a spiking neuronal 
+model of motor cortex.  PLoS ONE.
+
+This document provides brief installation and usage instructions.
+
+INSTALLATION
+
+Note: the code has been designed to work on Linux machines. It may
+work on Macs and will definitely not work on Windows.  This 
+simulation also requires a good deal of memory to run: e.g. it will  
+run on a machine with ~ 8 GB, but not one with ~ 3 GB.
+
+Instructions:
+
+1. Unzip all files.
+2. Type "nrnivmodl *.mod" in the directory. This should create a
+directory called either i686 or x86_64, depending on your computer's
+architecture, and put a file called "special" in that directory.
+
+
+USAGE
+
+Run the simulation by typing "nrngui sim.hoc" in the directory. 
+After brief initialization, a window should appear showing the arm 
+moving with respect to the target X.  After this has run for a 
+simulated 200 s, two more windows will be generated on top of this: 
+a window showing the spiking of all of the units of the model in 
+red for the first 1 s of the simulation, and another window showing 
+the trajectory of the elbow joint in blue as it learns to reach for 
+35 degrees.  Note that the raster plot shows 96 PR and 96 EM 
+cells.  48 of each of these are related to shoulder joint activity 
+of the virtual arm; the firing of these cells is not shown in the 
+figures of the paper.
+
+To run under a different learning target, you can go into arm.hoc, 
+Line 66 and change the value of 'targid' to pick a different elbow 
+angle target  (0 = 135, 1 = 105, 2 = 75, 3 = 35, 4 = 0 degrees).  
+To choose a different learning condition, you can go to Line 54 and 
+change the value of RLMode: 0 = no-learning, 1 = reward-only, 
+2 = punishment only, 3 = reward-and-punishment.  The random seed for 
+network wiring can be changed by going into Line 91 of network.hoc 
+and setting 'dvseed' to a different value.  The random seed for the 
+babbling noise can be changed by resetting the value of 'inputseed' 
+in Line 13 in stim.hoc.  After resetting these parameters and 
+saving the files, simulations can then be started as above.
