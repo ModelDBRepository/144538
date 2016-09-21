@@ -46,3 +46,6 @@ and setting 'dvseed' to a different value.  The random seed for the
 babbling noise can be changed by resetting the value of 'inputseed' 
 in Line 13 in stim.hoc.  After resetting these parameters and 
 saving the files, simulations can then be started as above.
+
+20160921 Updates from the Lytton lab to allow the model to run on mac
+OS X.
