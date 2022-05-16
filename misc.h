@@ -1,11 +1,11 @@
-// $Id: misc.h,v 1.33 2010/06/05 15:32:28 billl Exp $
+// $Id: misc.h,v 1.38 2011/11/02 15:26:48 billl Exp $
 
 #include <stdlib.h>
 #include <math.h>
 #include <limits.h> /* contains LONG_MAX */
 #include <time.h>
 #include <sys/time.h> 
-#include <values.h>
+#include <float.h>
 #include <pthread.h>
 
 #if !defined(t)
@@ -30,10 +30,10 @@ typedef struct BVEC {
 #define BYTEHEADER int _II__;  char *_IN__; char _OUT__[16]; int BYTESWAP_FLAG=0;
 #define BYTESWAP(_X__,_TYPE__) \
     if (BYTESWAP_FLAG == 1) { \
-	_IN__ = (char *) &(_X__); \
-	for (_II__=0;_II__<sizeof(_TYPE__);_II__++) { \
-		_OUT__[_II__] = _IN__[sizeof(_TYPE__)-_II__-1]; } \
-	(_X__) = *((_TYPE__ *) &_OUT__); \
+    _IN__ = (char *) &(_X__); \
+    for (_II__=0;_II__<sizeof(_TYPE__);_II__++) { \
+        _OUT__[_II__] = _IN__[sizeof(_TYPE__)-_II__-1]; } \
+    (_X__) = *((_TYPE__ *) &_OUT__); \
     }
 
 #define UNCODE(_X_,_J_,_Y_) {(_Y_)=floor((_X_)/sc[(_J_)])/sc[4]; \
@@ -47,16 +47,17 @@ typedef struct BVEC {
 #define LG2 0.69314718055994530941723212145818
 #define VRRY 200
 #define ISVEC(_OB__) (strncmp(hoc_object_name(_OB__),"Vector",6)==0)
+#define dmaxuint 4294967295. // for 32 bits
 
 // Andre Fentons cast designations
-typedef	unsigned char	ui1;	/* one byte unsigned integer */
-typedef	char		si1;	/* one byte signed integer */
-typedef unsigned short	ui2;	/* two byte unsigned integer */
-typedef short		si2;	/* two byte signed integer */
-typedef unsigned int	ui4;	/* four byte unsigned integer */ 
-typedef int		si4;	/* four byte signed integer */ 
-typedef float		sf4;	/* four byte signed floating point number */ 
-typedef double		sf8;	/* eight byte signed floating point number */ 
+typedef unsigned char   ui1;    /* one byte unsigned integer */
+typedef char        si1;    /* one byte signed integer */
+typedef unsigned short  ui2;    /* two byte unsigned integer */
+typedef short       si2;    /* two byte signed integer */
+typedef unsigned int    ui4;    /* four byte unsigned integer */ 
+typedef int     si4;    /* four byte signed integer */ 
+typedef float       sf4;    /* four byte signed floating point number */ 
+typedef double      sf8;    /* eight byte signed floating point number */ 
 
 extern double ERR,GET,SET,OK,NOP,ALL,NEG,POS,CHK,NOZ,GTH,GTE,LTH,LTE,EQU;
 extern double EQV,EQW,EQX,NEQ,SEQ,RXP,IBE,EBI,IBI,EBE;
@@ -75,8 +76,8 @@ extern int vector_instance_px();
 extern void* vector_arg();
 extern double* vector_vec();
 extern int vector_buffer_size(void*);
-extern void mcell_ran4_init(unsigned int *idum);
-extern double mcell_ran4(unsigned int* idum,double* ran_vec,unsigned int n,double range);
+extern void mcell_ran4_init(u_int32_t);
+extern double mcell_ran4(u_int32_t *idx1, double *x, unsigned int n, double range);
 extern int nrn_mlh_gsort();
 extern int ivoc_list_count(Object*);
 extern Object* ivoc_list_item(Object*, int);
@@ -87,6 +88,7 @@ extern int hoc_is_pdouble_arg(int narg);
 extern Symbol *hoc_get_symbol(char *);
 extern Symbol *hoc_lookup(const char*);
 extern Point_process* ob2pntproc(Object*);
+
 extern char* hoc_object_name(Object*);
 extern double nrn_event_queue_stats(double*);
 extern void clear_event_queue();
@@ -112,7 +114,7 @@ extern int list_vector_px2 (Object *ob, int i, double** px, IvocVect** vv);
 extern int list_vector_px3 (Object *ob, int i, double** px, IvocVect** vv);
 extern int cmpdfn();
 extern int openvec(int, double **);
-int list_vector_px(Object *ob, int i, double** px);
+int list_vector_px();
 double *list_vector_resize(Object *ob, int i, int sz);
 static void hxe() { hoc_execerror("",0); }
 extern void FreeListVec(ListVec** pp);
@@ -136,3 +138,8 @@ extern double ismono1 (double *x, int n, int flag);
 double kcorfast(double* input1, double* input2, double* i1d , double* i2d,int n,double* ps);
 double Rktau (double* x, double* y, int n); // R version
 double kcorfast (double* input1, double* input2, double* i1d , double* i2d,int n,double* ps);
+
+
+
+
+
