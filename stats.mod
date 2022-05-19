@@ -50,7 +50,7 @@ union dblint {
 static u_int32_t ilow=0;  
 static u_int32_t ihigh=0; // same as ihigh in (/usr/site/nrniv/nrn/src/ivoc/ivocrand.cpp:75)
 static double *x1x, *y1y, *z1z;
-static void vprpr();
+static void vprpr(double x, int base);
 
 static int compare_ul(const void* l1, const void* l2) {
   int retval;
@@ -424,11 +424,9 @@ static double* getrank (int n, double mdata[])
  * a memory allocation error, it returns NULL.
  */
 { int i;
-  double* rank;
-  int* index;
-  rank = malloc(n*sizeof(double));
+  double* rank = (double*)malloc(n*sizeof(double));
   if (!rank) return NULL;
-  index = malloc(n*sizeof(int));
+  int* index = (int*)malloc(n*sizeof(int));
   if (!index)
   { free(rank);
     return NULL;
@@ -468,11 +466,9 @@ static double spearman(int n, double* data1, double* data2)
   double denom1 = 0.;
   double denom2 = 0.;
   double avgrank;
-  double* tdata1;
-  double* tdata2;
-  tdata1 = malloc(n*sizeof(double));
+  double* tdata1 = (double*)malloc(n*sizeof(double));
   if(!tdata1) return 0.0; /* Memory allocation error */
-  tdata2 = malloc(n*sizeof(double));
+  double* tdata2 = (double*)malloc(n*sizeof(double));
   if(!tdata2) /* Memory allocation error */
   { free(tdata1);
     return 0.0;
@@ -643,7 +639,7 @@ int qsort2 (double *p1in, double* p2in, int n,double* p1out,double* p2out) {
   int i;
   scr=scrset(n);
   for (i=0;i<n;i++) scr[i]=i;
-  nrn_mlh_gsort(p1in, scr, n, cmpdfn);
+  nrn_mlh_gsort(p1in, (int*)scr, n, cmpdfn);
   for (i=0;i<n;i++) {
     p1out[i]=p1in[scr[i]];
     p2out[i]=p2in[scr[i]];
@@ -861,8 +857,8 @@ static double hash (void* vv) {
       } else   {  xx.d=vvo[j][i]; }
       if (xx.i[0]==0) { xx.i[0]=xx.i[1]; xx.i[0]<<=4; } // high order bits may be 0
       if (xx.i[1]==0) { xx.i[1]=xx.i[0]; xx.i[1]<<=4; } // low order bits unlikely 0
-      mcell_ran4_init(&xx.i[1]);
-      mcell_ran4(&xx.i[0], &y, 1, big); // generate a pseudorand number based on these
+      mcell_ran4_init((uint32_t)(uintptr_t)&xx.i[1]);
+      mcell_ran4((uint32_t*)&xx.i[0], &y, 1, big); // generate a pseudorand number based on these
       prod*=y;  // keep multiplying these out
     }
     if (! vfl) x[i]=prod; else return prod; // just return the 1 value
@@ -1043,7 +1039,7 @@ static double setrnd (void* vv) {
       scrset(nex);
       x1x = (double *)realloc(x1x,sizeof(double)*nx*4);
       for (i=0;i<nex;i++) scr[i]=i;
-      nrn_mlh_gsort(ex, scr, nex, cmpdfn);
+      nrn_mlh_gsort(ex, (int*)scr, nex, cmpdfn);
       for (i=0;i<nex;i++) x1x[i]=ex[scr[i]];
       for (i=0;i<nex;i++) ex[i]=x1x[i];
     }
@@ -2044,8 +2040,8 @@ unsigned int hashseed2 (int na, double* x) {
     if (xx.i[0]==0) { xx.i[0]=xx.i[1]; xx.i[0]<<=4; } // high order bits may be 0
     if (xx.i[1]==0) { xx.i[1]=xx.i[0]; xx.i[1]<<=4; } // low order bits unlikely 0
     xx.i[0]+=(i+1); xx.i[1]+=(i+1); // so different for different order args
-    mcell_ran4_init(&xx.i[1]);
-    mcell_ran4(&xx.i[0], &y, 1, big); // generate a pseudorand number based on these
+    mcell_ran4_init((uint32_t)(uintptr_t)&xx.i[1]); // probably a bug
+    mcell_ran4((uint32_t*)&xx.i[0], &y, 1, big); // generate a pseudorand number based on these
     while (y>UINT_MAX) y/=1e9; // UINT_MAX is 4.294967e+09
     ihigh*=(unsigned int)y;  // keep multiplying these out
   }
@@ -2148,8 +2144,6 @@ FUNCTION gammln (xx) {
 FUNCTION betai(a,b,x) {
 VERBATIM {
   double bt;
-  double gammln(),betacf();
-
   if (_lx < 0.0 || _lx > 1.0) {printf("Bad x in routine BETAI\n"); hxe();}
   if (_lx == 0.0 || _lx == 1.0) bt=0.0;
   else
@@ -2222,7 +2216,6 @@ FUNCTION tstat() {
 
 FUNCTION tdistrib() {
   VERBATIM
-  double gammln();
   double x = *getarg(1);
   double dof = *getarg(2);
   double res = (gammln( (dof+1.0) / 2.0 )  / gammln( dof / 2.0 ) );

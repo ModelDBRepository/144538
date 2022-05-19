@@ -412,7 +412,7 @@ FUNCTION GetCCR () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of distances to each cell , 0 == no path found
   int* pNeighbors = (int*)calloc(iCells,sizeof(int));
@@ -543,7 +543,7 @@ FUNCTION GetCentrality () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of avg distances to each cell , 0 == no path found
   double* pCE; 
@@ -655,7 +655,7 @@ FUNCTION GetCC () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of distances to each cell , 0 == no path found
   int* pNeighbors = (int*)calloc(iCells,sizeof(int));
@@ -753,7 +753,7 @@ FUNCTION CountNeighborsR () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of avg distances to each cell , 0 == no path found
   double* pVD; 
@@ -1166,7 +1166,7 @@ FUNCTION GetPathR () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of avg distances to each cell , 0 == no path found
   double* pVD; 
@@ -1313,7 +1313,7 @@ FUNCTION GetCCSubPop () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of distances to each cell , 0 == no path found
   int* pNeighbors = (int*)calloc(iCells,sizeof(int));
@@ -1422,7 +1422,7 @@ FUNCTION GetCCSubPop () {
 FUNCTION GetRecurCount () {
   VERBATIM
   ListVec* pList;
-  int iCells,*pLen,iFromSz,iThruSz,idx,myID,youID,jdx,iCheckSz,*pVisited,*pCheck;
+  int iCells,iFromSz,iThruSz,idx,myID,youID,jdx,iCheckSz,*pVisited,*pCheck;
   double **pLV,*pFrom,*pThru,*pR;
 
   pList = AllocListVec(*hoc_objgetarg(1));
@@ -1439,7 +1439,7 @@ FUNCTION GetRecurCount () {
   }
 
   pLV = pList->pv;
-  pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   pFrom=pThru=0;
   iFromSz = vector_arg_px(3,&pFrom); iThruSz = vector_arg_px(4,&pThru);
@@ -1509,7 +1509,7 @@ FUNCTION GetPairDist () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   double* pFrom = 0, *pTo = 0;
   int iFromSz = vector_arg_px(3,&pFrom) , iToSz = vector_arg_px(4,&pTo);
@@ -1632,7 +1632,7 @@ FUNCTION GetPathSubPop () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of avg distances to each cell , 0 == no path found
   double* pVD; 
@@ -1787,7 +1787,7 @@ FUNCTION GetLoopLength () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of avg distances to each cell , 0 == no path found
   double* pVD; 
@@ -1928,7 +1928,7 @@ FUNCTION GetPathEV () {
   }
 
   double** pLV = pList->pv;
-  int* pLen = pList->plen;
+  unsigned int* pLen = pList->plen;
 
   //init vector of distances to each cell , 0 == no path found
   double* pVD; 

@@ -780,7 +780,7 @@ static double nte (void* vv) {
     i = ivoc_list_count(ob);
     if (i<3) {printf("nte() ERRA out list should be at least 3 (%d)\n",i); hxe();}
     for (k=0;k<3;k++) { 
-      j=list_vector_px3(ob, k, &vvo[k], &vvl);
+      j=list_vector_px3(ob, k, &vvo[k], (void**)&vvl);
       if (k==0) omax=j; else if (omax!=j||j<10) {
         printf("nte() ERRC: too small %d %d\n",j,omax); hxe(); }
     }

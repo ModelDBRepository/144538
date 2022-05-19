@@ -15,32 +15,7 @@ PARAMETER {
 }
 
 VERBATIM
-#include <stdlib.h>
-#include <math.h>
-#include <limits.h> // contains LONG_MAX 
-#include <sys/time.h> 
-extern double* hoc_pgetarg();
-extern double hoc_call_func(Symbol*, int narg);
-extern FILE* hoc_obj_file_arg(int narg);
-extern Object** hoc_objgetarg();
-extern void vector_resize();
-extern int vector_instance_px();
-extern void* vector_arg();
-extern double* vector_vec();
-extern double hoc_epsilon;
-extern double chkarg();
-extern void set_seed();
-extern int ivoc_list_count(Object*);
-extern Object* ivoc_list_item(Object*, int);
-extern int hoc_is_double_arg(int narg);
-extern char* hoc_object_name(Object*);
-char ** hoc_pgargstr();
-int list_vector_px();
-int list_vector_px2();
-int list_vector_px3();
-double *list_vector_resize();
-int ismono1();
-static void hxe() { hoc_execerror("",0); }
+#include "misc.h"
 static void hxf(void *ptr) { free(ptr); hoc_execerror("",0); }
 ENDVERBATIM
 

@@ -3124,7 +3124,7 @@ VERBATIM {
   num = ivoc_list_count(ob);
   if (num!=7) { printf("INTF6 lof ERR %d>7\n",num); hxe(); }
   for (i=0;i<num;i++) { 
-    j = list_vector_px3(ob, i, &vvo[i], &vv[i]);
+    j = list_vector_px3(ob, i, &vvo[i], (void**)&vv[i]);
     if (i==0) nx=j;
     if (j!=nx) { printf("INTF6 lof ERR %d %d\n",j,nx); hxe(); }
   }
@@ -3374,7 +3374,7 @@ PROCEDURE initwrec () {
     if (num>NSW) { printf("INTF6 initwrec() WARN: can only store %d ww vecs\n",NSW); hxe();}
     nsw=(double)num;
     for (k=0;k<num;k++) {
-      cap = list_vector_px2(ob, k, &wwo[k], &ww[k]);
+      cap = list_vector_px2(ob, k, &wwo[k], (void**)&ww[k]);
       if (k==0) wwsz=cap; else if (wwsz!=cap) {
         printf("INTF6 initwrec ERR w-vecs size err: %d,%d,%d",k,wwsz,cap); hxe(); }
     }
