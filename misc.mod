@@ -48,7 +48,7 @@ VERBATIM
 #include <time.h>
 #include <stdio.h>
 #include <limits.h>
-extern int hoc_is_tempobj(int narg);
+#include "misc.h"
 ENDVERBATIM
 
 :* FUNCTION file_exist()

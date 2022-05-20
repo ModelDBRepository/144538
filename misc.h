@@ -93,6 +93,8 @@ extern Symbol *hoc_get_symbol(char *);
 extern void cvode_fadvance(double);
 extern void clear_event_queue();
 extern Object* ivoc_list_item(Object*, int);
+extern int hoc_is_tempobj(int narg);
+extern int hoc_is_tempobj_arg(int narg);
 #endif
 extern unsigned int hashseed2 (int na, double* x);
 extern unsigned int  dcrsz;
