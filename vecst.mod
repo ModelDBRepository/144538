@@ -793,6 +793,7 @@ static double fread2 (void* vv) {
     }
     free((char *)xf);    
   } else hoc_execerror("Type unsupported in fread2 ", 0);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -814,6 +815,7 @@ static double revec (void* vv) {
     }
   }
   vector_resize(vv,k);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -916,6 +918,7 @@ static double vfill (void* vv) {
 	nx = vector_instance_px(vv, &x);
 	nv1 = vector_arg_px(1, &v1);
         for (i=0;i<nx;i++) x[i]=v1[i%nv1];
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1097,6 +1100,7 @@ static double vscl (double *x, double n) {
   r=max-min;  // range
   sf = (b-a)/r; // scaling factor
   for (i=0;i<n;i++) x[i]=(x[i]-min)*sf+a;
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1110,6 +1114,7 @@ static double scl (void* vv) {
   if (nx!=nsrc) { hoc_execerror("scl:Vectors not same size: ", 0); }
   for (i=0;i<nx;i++) x[i]=src[i];
   vscl(x,nx);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1132,6 +1137,7 @@ static double sccvlv (void* vv) {
     vscl(tmp,j-1);
     for (k=0;k<j;k++) x[i]+=filt[k]*tmp[k];
   }
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1188,6 +1194,7 @@ static double cvlv (void* vv) {
       if (k>0 && k<nsrc-1) x[i]+=filt[j]*src[k];
     }
   }
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1285,7 +1292,7 @@ static double keyind (void* vv) {
   int i, j, k, ni, nk, nv[VRRY], num;
   double *ind, *key, *vvo[VRRY];
   ni = vector_instance_px(vv, &ind); // vv is ind
-  for (i=0;ifarg(i);i++); i--; // drop back by one to get numarg()
+  for (i=0;ifarg(i);i++) {} i--; // drop back by one to get numarg()
   if (i>VRRY) hoc_execerror("ERR: keyind can only handle VRRY vectors", 0);
   num = i-1; // number of vectors to be picked apart 
   for (i=0;i<num;i++) { 
@@ -1507,6 +1514,7 @@ static double bpeval (void* vv) {
   } else {
     for (i=0;i<n;i++) vo[i]=outp[i]*(1.-1.*outp[i])*del[i];
   }
+  return 0.0;
 }
 ENDVERBATIM
  
