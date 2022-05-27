@@ -48,7 +48,7 @@ VERBATIM
 #include <time.h>
 #include <stdio.h>
 #include <limits.h>
-extern int hoc_is_tempobj(int narg);
+#include "misc.h"
 ENDVERBATIM
 
 :* FUNCTION file_exist()
@@ -58,7 +58,7 @@ VERBATIM
        errno else will get a nrnoc error.  Seems to be a problem even
        if I don't include <errno.h> */
 
-    char *gargstr(), *filename;
+    char *filename;
 
     filename = gargstr(1);
 
@@ -85,7 +85,6 @@ FUNCTION sassign() {
 VERBATIM
     FILE *pipein;
     char string[BUFSIZ], **strname, *syscall;
-    char** hoc_pgargstr();
 
     strname = hoc_pgargstr(1);
     syscall = gargstr(2);
@@ -217,8 +216,7 @@ ENDVERBATIM
 FUNCTION hocgetc() {
 VERBATIM
 {	
-  FILE* f, *hoc_obj_file_arg();
-  f = hoc_obj_file_arg(1);
+  FILE* f = hoc_obj_file_arg(1);
   _lhocgetc = (double)getc(f);
 }
 ENDVERBATIM

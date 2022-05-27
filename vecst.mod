@@ -102,6 +102,7 @@ ASSIGNED { RES }
 
 VERBATIM
 #include "misc.h"
+int IsList (Object* p);
 ENDVERBATIM
 
 VERBATIM
@@ -150,7 +151,7 @@ static double ident (void* vv) {
   int nx,bsz; double* x;
   nx = vector_instance_px(vv, &x);
   bsz=vector_buffer_size(vv);
-  printf("Obj*%x Dbl*%x Size: %d Bufsize: %d\n",(unsigned int)vv,(unsigned int)x,nx,bsz);
+  printf("Obj*%p Dbl*%p Size: %d Bufsize: %d\n", vv, x, nx, bsz);
   return (double)nx;
 }
 ENDVERBATIM
@@ -710,8 +711,7 @@ VERBATIM
 static double iwr (void* vv) {
   int i, j, nx; size_t r;
   double *x;
-  FILE* f, *hoc_obj_file_arg();
-  f = hoc_obj_file_arg(1);
+  FILE* f = hoc_obj_file_arg(1);
   nx = vector_instance_px(vv, &x);
   scrset(nx);
   for (i=0;i<nx;i++) scr[i]=(int)x[i]; // copy into integer array 
@@ -726,8 +726,7 @@ VERBATIM
 static double ird (void* vv) {
   int i, j, nx, n; size_t r;
   double *x;
-  FILE* f, *hoc_obj_file_arg();
-  f = hoc_obj_file_arg(1);
+  FILE* f = hoc_obj_file_arg(1);
   nx = vector_instance_px(vv, &x);
   r=fread(&n,sizeof(int),1,f);  // size
   if (n>scrsz) { 
@@ -755,7 +754,7 @@ VERBATIM
 static double fread2 (void* vv) {
   int i, j, nx, n, type, maxsz; size_t r;
   double *x;
-  FILE* fp, *hoc_obj_file_arg();
+  FILE* fp;
   BYTEHEADER
 
   fp = hoc_obj_file_arg(1);
@@ -794,6 +793,7 @@ static double fread2 (void* vv) {
     }
     free((char *)xf);    
   } else hoc_execerror("Type unsupported in fread2 ", 0);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -815,6 +815,7 @@ static double revec (void* vv) {
     }
   }
   vector_resize(vv,k);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -917,6 +918,7 @@ static double vfill (void* vv) {
 	nx = vector_instance_px(vv, &x);
 	nv1 = vector_arg_px(1, &v1);
         for (i=0;i<nx;i++) x[i]=v1[i%nv1];
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1098,6 +1100,7 @@ static double vscl (double *x, double n) {
   r=max-min;  // range
   sf = (b-a)/r; // scaling factor
   for (i=0;i<n;i++) x[i]=(x[i]-min)*sf+a;
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1111,6 +1114,7 @@ static double scl (void* vv) {
   if (nx!=nsrc) { hoc_execerror("scl:Vectors not same size: ", 0); }
   for (i=0;i<nx;i++) x[i]=src[i];
   vscl(x,nx);
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1133,6 +1137,7 @@ static double sccvlv (void* vv) {
     vscl(tmp,j-1);
     for (k=0;k<j;k++) x[i]+=filt[k]*tmp[k];
   }
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1189,6 +1194,7 @@ static double cvlv (void* vv) {
       if (k>0 && k<nsrc-1) x[i]+=filt[j]*src[k];
     }
   }
+  return 0.0;
 }
 ENDVERBATIM
 
@@ -1286,7 +1292,7 @@ static double keyind (void* vv) {
   int i, j, k, ni, nk, nv[VRRY], num;
   double *ind, *key, *vvo[VRRY];
   ni = vector_instance_px(vv, &ind); // vv is ind
-  for (i=0;ifarg(i);i++); i--; // drop back by one to get numarg()
+  for (i=0;ifarg(i);i++) {} i--; // drop back by one to get numarg()
   if (i>VRRY) hoc_execerror("ERR: keyind can only handle VRRY vectors", 0);
   num = i-1; // number of vectors to be picked apart 
   for (i=0;i<num;i++) { 
@@ -1336,11 +1342,11 @@ ENDVERBATIM
 : max is maximum diff to add to the tq db
 VERBATIM
 static double nearall (void* vv) {
-  register int	lo, hi, mid;
+  int lo, hi, mid;
   int i, j, k, kk, nx, ny, minind, nv[4];
   Object *ob;
   void* vvl[4];
-  double *x, *y, *vvo[4], targ, dist, new, max, tmp;
+  double *x, *y, *vvo[4], targ, dist, new_d, max, tmp;
   nx = vector_instance_px(vv, &x);
   max = *getarg(1);
   ny = vector_arg_px(2, &y);
@@ -1358,8 +1364,8 @@ static double nearall (void* vv) {
     }
     dist=fabs(x[mid]-targ); minind=mid;
     for (i=-1;i<=1;i+=2) { kk=mid+i; // check the flanking values
-      if (kk>0 && kk<nx && (new=fabs(x[kk]-targ))<dist) { 
-        dist=new;
+      if (kk>0 && kk<nx && (new_d=fabs(x[kk]-targ))<dist) { 
+        dist=new_d;
         minind=kk;
       }
     }
@@ -1397,14 +1403,14 @@ ENDVERBATIM
 VERBATIM
 static double nearest (void* vv) {
   int i, nx, minind, flag=0;
-  double *x, targ, dist, new, *to;
+  double *x, targ, dist, new_d, *to;
   nx = vector_instance_px(vv, &x);
   targ = *getarg(1);
   if (ifarg(3)) flag = (int)*getarg(3);
   dist = 1e9;
-  for (i=0; i<nx; i++) if ((new=fabs(x[i]-targ))<dist) { 
-    if (flag && new==0) continue; // flag signals to not pick self
-    dist=new;
+  for (i=0; i<nx; i++) if ((new_d=fabs(x[i]-targ))<dist) { 
+    if (flag && new_d==0) continue; // flag signals to not pick self
+    dist=new_d;
     minind=i;
   }
   if (ifarg(2)) *(hoc_pgetarg(2)) = dist;
@@ -1508,6 +1514,7 @@ static double bpeval (void* vv) {
   } else {
     for (i=0;i<n;i++) vo[i]=outp[i]*(1.-1.*outp[i])*del[i];
   }
+  return 0.0;
 }
 ENDVERBATIM
  
@@ -1871,7 +1878,7 @@ static double fetch (void* vv) {
     ny = vector_arg_px(3, &y);
     if (ny>pL->isz) vector_resize(vector_arg(3),pL->isz); // don't make bigger if only want a few
     for (i=0,j=0,cnt=0;i<pL->isz && j<ny;i++,j++) {
-      if (ix>pL->plen[i]) {printf("vecst:fetch()ERRB: %d %d %x\n",i,ix,(unsigned int)pL->pv[i]); 
+      if (ix>pL->plen[i]) {printf("vecst:fetch()ERRB: %d %d %p\n", i, ix, pL->pv[i]); 
         FreeListVec(&pL); hxe();}
       y[j]=pL->pv[i][ix];
       cnt++;
@@ -1880,7 +1887,7 @@ static double fetch (void* vv) {
   } else {
     for (i=0,j=3,cnt=0;i<pL->isz && ifarg(j);i++,j++) {
       if (hoc_is_double_arg(j)) continue; // skip this one
-      if (ix>pL->plen[i]) {printf("vecst:fetch()ERRB1: %d %d %x\n",i,ix,(unsigned int)pL->pv[i]); 
+      if (ix>pL->plen[i]) {printf("vecst:fetch()ERRB1: %d %d %p\n", i, ix, pL->pv[i]); 
         FreeListVec(&pL); hxe();}
       *hoc_pgetarg(j)=ret=pL->pv[i][ix];
       cnt++;      
@@ -2297,7 +2304,7 @@ static double uniq (void* vv) {
   }
   scrset(n);
   for (i=0;i<n;i++) scr[i]=i;
-  nrn_mlh_gsort(x, scr, n, cmpdfn);
+  nrn_mlh_gsort(x, (int*)scr, n, cmpdfn);
   if (ny) y[0]=x[scr[0]]; 
   if (nz>0) z[0]=1.;
   for (i=1, lastx=x[scr[0]], cnt=1; i<n; i++) {
@@ -2358,7 +2365,7 @@ int uniq2 (int n, double *x, double *y, double *z) {
   if (n==0) return 0;
   scrset(n);
   for (i=0;i<n;i++) scr[i]=i;
-  nrn_mlh_gsort(x, scr, n, cmpdfn); // sort x
+  nrn_mlh_gsort(x, (int*)scr, n, cmpdfn); // sort x
   y[0]=x[scr[0]]; // first value
   for (i=1, lastx=x[scr[0]], cnt=1; i<n; i++) {
     if (x[scr[i]]>lastx+hoc_epsilon) {
@@ -2905,7 +2912,15 @@ FUNCTION isojt () {
   Object *ob1, *ob2;
   ob1 = *hoc_objgetarg(1); ob2 = *hoc_objgetarg(2);
   if (!ob1) if (!ob2) return 1; else return 0;
-  if (!ob2 || ob1->template != ob2->template) {
+#define ctemplate template
+#ifdef NRN_VERSION_GTEQ_8_2_0
+#if NRN_VERSION_GTEQ(9, 0, 0)
+#undef ctemplate
+#define ctemplate ctemplate
+#endif
+#endif
+  if (!ob2 || ob1->ctemplate != ob2->ctemplate) {
+#undef ctemplate
     return 0;
   }
   return 1;

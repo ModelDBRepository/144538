@@ -47,5 +47,11 @@ babbling noise can be changed by resetting the value of 'inputseed'
 in Line 13 in stim.hoc.  After resetting these parameters and 
 saving the files, simulations can then be started as above.
 
+CHANGELOG
+
 20160921 Updates from the Lytton lab to allow the model to run on mac
 OS X.
+
+20220517 Updated MOD files to contain valid C++ and be compatible with
+the upcoming versions 8.2 and 9.0 of NEURON. Updated to use post ~2011
+signature of mcell_ran4_init function and fix hashseed2 argument.
